@@ -24,6 +24,146 @@ import (
 // (仅str,f64,[]any,map[str]any, 如 []string, []int, map[string]string 等均未支持)
 type Obj map[string]any
 
+// var (
+// 	objType     = reflect.TypeOf(Obj{})
+// 	anyMapType  = reflect.TypeOf(map[string]any{})
+// 	anyListType = reflect.TypeOf([]any{})
+// 	defaultVal  = reflect.ValueOf(nil)
+// )
+
+// func (o Obj) iget(parts []string, isCreate ...bool) (pre, ret reflect.Value, err error) {
+// 	if len(parts) == 0 {
+// 		return defaultVal, reflect.ValueOf(o), nil
+// 	}
+// 	if len(parts) == 1 {
+// 		return reflect.ValueOf(o), reflect.ValueOf(o[parts[0]]), nil
+// 	}
+// 	var (
+// 		flag           = len(isCreate) > 0 && isCreate[0]
+// 		curVal         = reflect.ValueOf(o)
+// 		preVal, preKey = reflect.Value{}, any(nil)
+// 	)
+// 	// 遍历路径
+// 	for i, key := range parts {
+// 	SWITCH:
+// 		switch curVal.Kind() {
+// 		case reflect.Map:
+// 			tmp := curVal.MapIndex(reflect.ValueOf(key))
+// 			if !tmp.IsValid() {
+// 				if !flag {
+// 					return defaultVal, defaultVal, fmt.Errorf("invalid map key %s at %s",
+// 						key, strings.Join(parts[:i], "."))
+// 				}
+// 				// 创建新的map
+// 				newMap := reflect.MakeMap(anyMapType)
+// 				curVal.SetMapIndex(reflect.ValueOf(key), newMap)
+// 				curVal = newMap
+// 			} else {
+// 				preVal, preKey, curVal = curVal, key, tmp.Elem()
+// 			}
+// 		case reflect.Slice:
+// 			idx, err := strconv.Atoi(key)
+// 			if err != nil || idx < 0 || idx > curVal.Len() || (idx == curVal.Len() && !flag) {
+// 				return defaultVal, defaultVal, fmt.Errorf("invalid array index %s at %s",
+// 					key, strings.Join(parts[:i], "."))
+// 			} else if idx == curVal.Len() && flag {
+// 				newMap := reflect.MakeMap(anyMapType)
+// 				curVal = reflect.Append(curVal, newMap)
+// 				switch preVal.Kind() {
+// 				case reflect.Map:
+// 					preVal.SetMapIndex(reflect.ValueOf(preKey), curVal)
+// 				case reflect.Slice:
+// 					preVal.Index(preKey.(int)).Set(curVal)
+// 				}
+// 			}
+// 			preVal, preKey, curVal = curVal, idx, curVal.Index(idx)
+// 		case reflect.Interface:
+// 			curVal = curVal.Elem()
+// 			goto SWITCH
+// 		case reflect.Uint, reflect.Uint32, reflect.Uint64,
+// 			reflect.Int, reflect.Int32, reflect.Int64,
+// 			reflect.Float32, reflect.Float64,
+// 			reflect.Bool, reflect.String:
+// 			if i < len(parts)-1 {
+// 				return defaultVal, defaultVal, fmt.Errorf("cannot access %s on %v (type %s)",
+// 					key, strings.Join(parts[:i], "."), curVal.Type(),
+// 				)
+// 			}
+// 		default:
+// 			return defaultVal, defaultVal, fmt.Errorf("cannot access %s on %v (type %s)",
+// 				key, strings.Join(parts[:i], "."), curVal.Type(),
+// 			)
+// 		}
+// 	}
+// 	return preVal, curVal, nil
+// }
+
+func (o Obj) get(parts []string, isCreate ...bool) (pre, ret any, err error) {
+	if len(parts) == 0 {
+		return nil, o, nil
+	}
+	if len(parts) == 1 {
+		return o, o[parts[0]], nil
+	}
+	var (
+		flag               = len(isCreate) > 0 && isCreate[0]
+		curVal, idx        = any(o), 0
+		preVal, preKey any = o, nil
+	)
+	for i, key := range parts {
+		switch currTyped := curVal.(type) {
+		case map[string]any:
+			if tmp := currTyped[key]; tmp == nil {
+				if !flag {
+					return nil, nil, fmt.Errorf("invalid map key %s at %s",
+						key, strings.Join(parts[:i], "."))
+				}
+				currTyped[key] = make(map[string]any)
+			}
+			preVal, preKey, curVal = curVal, key, currTyped[key]
+		case Obj:
+			if tmp := currTyped[key]; tmp == nil {
+				if !flag {
+					return nil, nil, fmt.Errorf("invalid map key %s at %s",
+						key, strings.Join(parts[:i], "."))
+				}
+				currTyped[key] = make(map[string]any)
+			}
+			preVal, preKey, curVal = curVal, key, currTyped[key]
+		case []any:
+			if idx, err = strconv.Atoi(key); err != nil ||
+				idx > len(currTyped) || (idx == len(currTyped) && !flag) {
+				return nil, nil, fmt.Errorf("set invalid index: %s on array %v ", key, strings.Join(parts[:i], "."))
+			} else if idx == len(currTyped) && flag {
+				currTyped = append(currTyped, make(map[string]any))
+				switch preTyped := preVal.(type) {
+				case map[string]any:
+					preTyped[preKey.(string)] = currTyped
+				case Obj:
+					preTyped[preKey.(string)] = currTyped
+				case []any:
+					preTyped[preKey.(int)] = currTyped
+				}
+			}
+			preVal, preKey, curVal = curVal, idx, currTyped[idx]
+		case uint, uint32, uint64,
+			int, int32, int64,
+			float32, float64,
+			bool, string:
+			if i < len(parts)-1 {
+				return nil, nil, fmt.Errorf("cannot access %s on %v (type %T)",
+					key, strings.Join(parts[:i], "."), curVal,
+				)
+			}
+		default:
+			return nil, nil, fmt.Errorf("cannot access %s on %v (type %T)",
+				key, strings.Join(parts[:i], "."), preVal,
+			)
+		}
+	}
+	return preVal, curVal, nil
+}
+
 // Set 设置指定路径的值.
 // key: 支持点分隔的路径，如 "user.address.street" 或 "users.0.name".
 // val: 支持的值类型包括:
@@ -53,47 +193,19 @@ func (o Obj) Set(key string, val any) error {
 		o[key] = val
 		return nil
 	}
-	var (
-		tmp             any
-		err             error
-		pre, current    any = o, o
-		idx, lastIdx        = 0, len(parts) - 1
-		lastKey, preKey     = parts[len(parts)-1], parts[len(parts)-2]
-	)
-	// 获取前一个元素
-	for i, part := range parts[:lastIdx] {
-		switch currTyped := current.(type) {
-		case map[string]any:
-			if tmp = currTyped[part]; tmp == nil {
-				currTyped[part] = make(map[string]any)
-			}
-			current, pre = currTyped[part], current
-		case Obj:
-			if tmp = currTyped[part]; tmp == nil {
-				currTyped[part] = make(map[string]any)
-			}
-			current, pre = currTyped[part], current
-		case []any:
-			if idx, err = strconv.Atoi(part); err != nil || idx >= len(currTyped) {
-				return fmt.Errorf("set invalid index: %s on array %v ", lastKey, strings.Join(parts[:i], "."))
-			} else if tmp = currTyped[idx]; tmp == nil {
-				currTyped[idx] = make(map[string]any)
-			}
-			current, pre = currTyped[idx], current
-		default:
-			return fmt.Errorf("set on %v[unsupported type]: %T",
-				strings.Join(parts[:i], "."), currTyped,
-			)
-		}
+	preKey, lastKey, lastIdx := parts[len(parts)-2], parts[len(parts)-1], len(parts)-1
+	pre, cur, err := o.get(parts[:len(parts)-1], true) // 预创建路径
+	if err != nil {
+		return err
 	}
 	// 赋值
-	switch currTyped := current.(type) {
+	switch currTyped := cur.(type) {
 	case map[string]any:
 		currTyped[lastKey] = val
 	case Obj:
 		currTyped[lastKey] = val
 	case []any:
-		if idx, err = strconv.Atoi(lastKey); err != nil || idx < 0 || idx > len(currTyped) {
+		if idx, err := strconv.Atoi(lastKey); err != nil || idx < 0 || idx > len(currTyped) {
 			return fmt.Errorf("set invalid index: %s on array %v ", lastKey, strings.Join(parts[:lastIdx], "."))
 		} else if idx == len(currTyped) {
 			currTyped = append(currTyped, val)
@@ -115,34 +227,6 @@ func (o Obj) Set(key string, val any) error {
 	return nil
 }
 
-func (o Obj) GetByPath(parts []string) (any, bool) {
-	current := o[parts[0]]
-	for _, part := range parts[1:] {
-		switch currTyped := current.(type) {
-		case map[string]any:
-			current = currTyped[part]
-		case Obj:
-			current = currTyped[part]
-		case []any:
-			if idx, err := strconv.Atoi(part); err == nil && idx < len(currTyped) && idx >= 0 {
-				current = currTyped[idx]
-			} else {
-				return nil, false
-			}
-		case string, bool,
-			float64, float32,
-			int, int32, int64,
-			uint, uint32, uint64:
-			current = currTyped
-		case nil:
-			return nil, true
-		default:
-			return nil, false
-		}
-	}
-	return current, true
-}
-
 func (o Obj) GetWithCheck(key string) (any, bool) {
 	if key == "" {
 		return nil, false
@@ -152,7 +236,11 @@ func (o Obj) GetWithCheck(key string) (any, bool) {
 		obj, ok := o[key]
 		return obj, ok
 	}
-	return o.GetByPath(parts)
+	_, cur, err := o.get(parts)
+	if err != nil {
+		return nil, false
+	}
+	return cur, true
 }
 
 // Get 获取指定路径的值，如果不存在则返回 nil

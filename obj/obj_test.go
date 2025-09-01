@@ -84,3 +84,124 @@ func printObj(obj Obj) {
 	}
 	fmt.Printf("JSON: %s\n", bytes)
 }
+
+func TestObj(t *testing.T) {
+	obj := Obj{
+		"user": map[string]any{
+			"addresses": []any{
+				map[string]any{"city": "Beijing"},
+			},
+		},
+	}
+
+	// 正常访问
+	_, val, err := obj.get([]string{"user", "addresses", "0", "city"})
+	if err != nil {
+		fmt.Printf("user.addresses.0.city err: %v\n", err)
+	} else {
+		fmt.Printf("user.addresses.0.city val: %v\n", val) // val = "Beijing"
+	}
+
+	// 访问不存在的路径
+	_, val, err = obj.get([]string{"user", "addresses", "1", "city"})
+	if err != nil {
+		fmt.Printf("user.addresses.1.city err: %v\n", err)
+	} else {
+		fmt.Printf("user.addresses.1.city val: %v\n", val)
+	}
+
+	// 带创建的访问
+	_, val, err = obj.get([]string{"new", "path", "key"}, true)
+	if err != nil {
+		fmt.Printf("new.path.key err: %v\n", err)
+	} else {
+		printObj(obj)
+	}
+
+	// 带创建的访问
+	_, val, err = obj.get([]string{"user", "addresses", "1"}, true)
+	if err != nil {
+		fmt.Printf("new.path.key err: %v\n", err)
+	} else {
+		printObj(Obj(obj))
+	}
+}
+
+func TestRftObj(t *testing.T) {
+	obj := RftObj{
+		"user": map[string]any{
+			"addresses": []any{
+				map[string]any{"city": "Beijing"},
+			},
+		},
+	}
+
+	// 正常访问
+	_, val, err := obj.iget([]string{"user", "addresses", "0", "city"})
+	if err != nil {
+		fmt.Printf("user.addresses.0.city err: %v\n", err)
+	} else {
+		fmt.Printf("user.addresses.0.city val: %v\n", val) // val = "Beijing"
+	}
+
+	// 访问不存在的路径
+	_, val, err = obj.iget([]string{"user", "addresses", "1", "city"})
+	if err != nil {
+		fmt.Printf("user.addresses.1.city err: %v\n", err)
+	} else {
+		fmt.Printf("user.addresses.1.city val: %v\n", val)
+	}
+
+	// 带创建的访问
+	_, val, err = obj.iget([]string{"new", "path", "key"}, true)
+	if err != nil {
+		fmt.Printf("new.path.key err: %v\n", err)
+	} else {
+		printObj(Obj(obj))
+	}
+
+	// 带创建的访问
+	_, val, err = obj.iget([]string{"user", "addresses", "1"}, true)
+	if err != nil {
+		fmt.Printf("new.path.key err: %v\n", err)
+	} else {
+		printObj(Obj(obj))
+	}
+}
+
+type M map[string]any
+
+type A []any
+
+func TestPowerByRftObj(t *testing.T) {
+	obj := Obj{
+		"user": M{
+			"addresses": []any{
+				map[string]any{"city": "Beijing"},
+			},
+		},
+		"list": A{
+			1, "2", 3.3,
+		},
+	}
+	data := obj.Get("user.addresses.0.city") // fail
+	fmt.Printf("obj: user.addresses.0.city: %v\n", data)
+	obj.Set("list.3", map[string]any{"hello": "world"}) // fail
+	printObj(obj)
+
+	rftObj := RftObj{
+		"user": M{
+			"addresses": []any{
+				map[string]any{"city": "Beijing"},
+			},
+		},
+		"list": A{
+			1, "2", 3.3,
+		},
+	}
+	data = rftObj.Get("user.addresses.0.city") // Beijing
+	fmt.Printf("rftObj: user.addresses.0.city: %v\n", data)
+	rftObj.Set("list.3", map[string]any{"hello": "world"}) // success
+	rftObj.Set("user.addresses.0.city", "chengdu")
+	printObj(Obj(rftObj))
+}
