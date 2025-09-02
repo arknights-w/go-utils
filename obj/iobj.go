@@ -43,7 +43,10 @@ func (o RftObj) iget(parts []string, isCreate ...bool) (pre, ret reflect.Value, 
 		return defaultVal, reflect.ValueOf(o), nil
 	}
 	if len(parts) == 1 {
-		return reflect.ValueOf(o), reflect.ValueOf(o[parts[0]]), nil
+		if val, ok := o[parts[0]]; ok {
+			return reflect.ValueOf(o), reflect.ValueOf(val), nil
+		}
+		return defaultVal, defaultVal, fmt.Errorf("invalid key %s", parts[0])
 	}
 	var (
 		flag           = len(isCreate) > 0 && isCreate[0]
@@ -54,6 +57,17 @@ func (o RftObj) iget(parts []string, isCreate ...bool) (pre, ret reflect.Value, 
 	for i, key := range parts {
 	SWITCH:
 		switch curVal.Kind() {
+		case reflect.Interface:
+			curVal = curVal.Elem()
+			goto SWITCH
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64, reflect.String, reflect.Bool:
+			if i < len(parts)-1 {
+				return defaultVal, defaultVal, fmt.Errorf("cannot access %s on %v (type %s)",
+					key, strings.Join(parts[:i], "."), curVal.Type(),
+				)
+			}
 		case reflect.Map:
 			tmp := curVal.MapIndex(reflect.ValueOf(key))
 			if !tmp.IsValid() {
@@ -90,22 +104,14 @@ func (o RftObj) iget(parts []string, isCreate ...bool) (pre, ret reflect.Value, 
 				}
 			}
 			preVal, preKey, curVal = curVal, idx, curVal.Index(idx)
-		case reflect.Interface:
-			curVal = curVal.Elem()
-			goto SWITCH
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
-			reflect.Float32, reflect.Float64, reflect.String, reflect.Bool:
-			if i < len(parts)-1 {
-				return defaultVal, defaultVal, fmt.Errorf("cannot access %s on %v (type %s)",
-					key, strings.Join(parts[:i], "."), curVal.Type(),
-				)
-			}
 		default:
 			return defaultVal, defaultVal, fmt.Errorf("cannot access %s on %v (type %s)",
 				key, strings.Join(parts[:i], "."), curVal.Type(),
 			)
 		}
+	}
+	if !curVal.IsValid() {
+		return defaultVal, defaultVal, fmt.Errorf("invalid key %s", strings.Join(parts, "."))
 	}
 	return preVal, curVal, nil
 }
@@ -270,4 +276,52 @@ func (o RftObj) GetU64(key string) uint64 {
 		return 0
 	}
 	return cast.ToUint64(v)
+}
+
+func (o RftObj) RangeA(key string, fn func(idx int, val any) bool) error {
+	if key == "" || o == nil {
+		return nil
+	}
+	parts := strings.Split(key, ".")
+	_, cur, err := o.iget(parts)
+	if err != nil {
+		return err
+	}
+	if cur.Kind() != reflect.Slice {
+		return fmt.Errorf("invalid type %s for key %s", cur.Type(), key)
+	}
+	for i := 0; i < cur.Len(); i++ {
+		if !fn(i, cur.Index(i).Interface()) {
+			break
+		}
+	}
+	return nil
+}
+
+func (o RftObj) RangeM(key string, fn func(key string, val any) bool) error {
+	if key == "" || o == nil {
+		return nil
+	}
+	parts := strings.Split(key, ".")
+	_, cur, err := o.iget(parts)
+	if err != nil {
+		return err
+	}
+	if cur.Kind() != reflect.Map {
+		return fmt.Errorf("invalid type %s for key %s", cur.Type(), key)
+	}
+	for _, k := range cur.MapKeys() {
+		if !fn(k.String(), cur.MapIndex(k).Interface()) {
+			break
+		}
+	}
+	return nil
+}
+
+func Trans2RftObj(o any) RftObj {
+	val := reflect.ValueOf(o)
+	if !val.CanConvert(objType) {
+		return nil
+	}
+	return val.Convert(objType).Interface().(RftObj)
 }
